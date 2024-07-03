@@ -2,7 +2,6 @@ import math, re
 from collections import deque
 from auto_runner.lib.common import *
 from auto_runner import mmr_sampling
-import time
 
 LoggableNode = TypeVar("LoggableNode", bound=MessageHandler)
 print_log = mmr_sampling.print_log

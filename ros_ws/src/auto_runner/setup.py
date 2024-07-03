@@ -21,7 +21,6 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            f"runner = {package_name}.runner:main",
             f"runner2 = {package_name}.runner2:main",
         ],
     },
