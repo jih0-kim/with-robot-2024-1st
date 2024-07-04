@@ -57,20 +57,22 @@ class MoveAction(EvHandle, Observer, Chainable):
         self.orient = orient
         self.cur_pos = cur_pos
         self.path = path
-        self.next_pos = path[1]
-        self.data_arrival = False
         self.integral_error = 0
         self.previous_error = None
 
     def setup(self, **kwargs):
         self.imu_data = None
+        self.next_pos = None
         IMUData.subscribe(o=self)
 
     def check_condition(self):
+        path = self.path
+        if not path:
+            return False
+
         orient = self.orient
         cur_pos = self.cur_pos
-        path = self.path
-        (x0, y0), (x1, y1) = cur_pos, self.next_pos
+        (x0, y0), (x1, y1) = cur_pos, path[1]
         output: bool = False
 
         if orient in [Orient.X, Orient._X]:
@@ -82,15 +84,15 @@ class MoveAction(EvHandle, Observer, Chainable):
             self.action = DirType.FORWARD, orient
             self.torque = 0.5
 
-            ix = len(path)-1
+            ix = len(path) - 1
             for index, pos in enumerate(path[1:], start=1):
                 if orient in [Orient.X, Orient._X]:
                     if pos[1] != y0:
-                        ix = index-1
+                        ix = index - 1
                         break
                 elif orient in [Orient.Y, Orient._Y]:
                     if pos[0] != x0:
-                        ix = index-1
+                        ix = index - 1
                         break
             # 회전 직적까지 후진
             self.next_pos = path[ix]
@@ -126,7 +128,9 @@ class MoveAction(EvHandle, Observer, Chainable):
                     Message(
                         title="move",
                         data_type="command",
-                        data=dict(torque=self._pid_torque(imu_data[:2]), theta=amend_theta),
+                        data=dict(
+                            torque=self._pid_torque(imu_data[:2]), theta=amend_theta
+                        ),
                     ),
                 )
 
@@ -138,17 +142,21 @@ class MoveAction(EvHandle, Observer, Chainable):
         IMUData.unsubscribe(o=self)
 
     # PID제어를통한 torque 계산
-    def _pid_torque(self, cur_pos:tuple[float,float]) -> float:
+    def _pid_torque(self, cur_pos: tuple[float, float]) -> float:
         # 에러정의
         Kp, Ki, Kd, dt = 0.3, 0.03, 0.6, 3.0
         max_integral = 1.0
         next_pos = PathManage.transfer2_point(self.next_pos)
-        
-        error = math.sqrt( (next_pos[0] - cur_pos[0])**2 + (next_pos[1] - cur_pos[1])**2)
-        
+
+        error = math.sqrt(
+            (next_pos[0] - cur_pos[0]) ** 2 + (next_pos[1] - cur_pos[1]) ** 2
+        )
+
         self.integral_error = min(self.integral_error + error, max_integral) / dt
-        
-        derivative_error = (error - (self.previous_error if self.previous_error else 0.0)) / dt
+
+        derivative_error = (
+            error - (self.previous_error if self.previous_error else 0.0)
+        ) / dt
 
         self.previous_error = error
 
@@ -157,10 +165,10 @@ class MoveAction(EvHandle, Observer, Chainable):
 
         output = Kp * error + Ki * self.integral_error + Kd * derivative_error
 
-        print_log(f"dynamic torque = {output}: {error=}, {self.integral_error=}, {derivative_error=}")
+        print_log(
+            f"dynamic torque = {output}: {error=}, {self.integral_error=}, {derivative_error=}"
+        )
         return output
-
-
 
     # 수평상태
     def _adjust_body(self, orient: Orient, angle: float):
@@ -207,28 +215,27 @@ class MoveAction(EvHandle, Observer, Chainable):
 
 class RotateAction(EvHandle, Observer, Chainable):
     start_angle: float
-    
-    rotate_map = {
-        'basic': (0.3, 0.15),
-        'fast' : (0.4, 0.20)
-    }
+
+    rotate_map = {"basic": (0.3, 0.15), "fast": (0.4, 0.20)}
+
     def __init__(self, orient: Orient, cur_pos: tuple, path: list[tuple]):
         super().__init__()
         self.orient = orient
         self.cur_pos = cur_pos
         self.path = path
-        self.next_pos = path[1]
-        self.rotate_policy = self.rotate_map['fast']
-
+        self.rotate_policy = self.rotate_map["fast"]
 
     def setup(self, **kwargs):
         self.imu_data: list = None
         IMUData.subscribe(o=self)
 
     def check_condition(self):
+        path = self.path
+        if not path:
+            return False
+
         orient = self.orient
         cur_pos = self.cur_pos
-        path = self.path
         (x0, y0), (x1, y1) = cur_pos, path[1]
 
         action = None
@@ -267,8 +274,7 @@ class RotateAction(EvHandle, Observer, Chainable):
             stop_event.set()
             time.sleep(0.3)
             stop_event.clear()
-        
-        
+
         state.shift(State.ROTATE_START)
 
         while not stop_event.is_set():
@@ -290,7 +296,11 @@ class RotateAction(EvHandle, Observer, Chainable):
                     "node",
                     Message(
                         data_type="command",
-                        data=dict(name="회전", torque=self.rotate_policy[1], theta=sign_ * 1.35),
+                        data=dict(
+                            name="회전",
+                            torque=self.rotate_policy[1],
+                            theta=sign_ * 1.35,
+                        ),
                     ),
                 )
 
@@ -326,53 +336,52 @@ class BackMoveAction(EvHandle, Observer, Chainable):
         self.orient = orient
         self.cur_pos = cur_pos
         self.path = path
-        self.next_pos = path[1]
-
-        self.imu_data = None
-        self.map_data = None
-        IMUData.subscribe(o=self)
-        MapData.subscribe(o=self)
 
     def setup(self, **kwargs):
-        pass
+        self.integral_error = 0
+        self.previous_error = None
+        self.next_pos = None
+        self.imu_data = None
+        IMUData.subscribe(o=self)
+
+    def _is_backward(self, cur_pos: tuple, next_pos: tuple, orient: Orient) -> bool:
+        x0, y0 = cur_pos
+        x1, y1 = next_pos
+        if orient == Orient.X:
+            return x0 > x1
+        elif orient == Orient._X:
+            return x0 < x1
+        elif orient == Orient.Y:
+            return y0 > y1
+        elif orient == Orient._Y:
+            return y0 < y1
+        else:
+            raise Exception("Wrong orient entered")
 
     def check_condition(self):
+        path = self.path
         orient = self.orient
         cur_pos = self.cur_pos
-        path = self.path
-        (x0, y0), (x1, y1) = cur_pos, path[1]
-        check_cnt = 0
-        while not self.map_data:
-            time.sleep(0.1)
-            if check_cnt > 20:
-                raise Exception("map data not found")
-            check_cnt += 1
+        next_pos = path[1]
 
-        mmr_sampling.print_log(f"map_data: {self.map_data}")
-        mmr_sampling.print_log(f"cur_pos: {cur_pos}")
-        _trap_map = {
-            orient.Y: self.map_data[x0][y0 - 1] if y0 > 1 else 1,
-            orient._Y: self.map_data[x0][y0 + 1] if y0 < 8 else 1,
-            orient.X: self.map_data[x0 - 1][y0] if x0 > 1 else 1,
-            orient._X: self.map_data[x0 + 1][y0] if x0 < 8 else 1,
-        }
-        _trap_map.pop(orient)
-
-        check_result = all(v > 0 for k, v in _trap_map.items())
-        if check_result == True:
-            self.action = (DirType.BACKWARD, self.orient)
-            for index, pos in enumerate(path, start=1):
+        output = self._is_backward(cur_pos, next_pos, orient)
+        if output == True:
+            self.action = DirType.BACKWARD, orient
+            x0, y0 = cur_pos
+            ix = len(path) - 1
+            for index, pos in enumerate(path[1:], start=1):
                 if orient in [Orient.X, Orient._X]:
                     if pos[1] != y0:
+                        ix = index - 1
                         break
                 elif orient in [Orient.Y, Orient._Y]:
                     if pos[0] != x0:
+                        ix = index - 1
                         break
-            else:
-                # 회전 직적까지 후진
-                self.next_pos = path[index - 1]
+            # 회전 직적까지 후진
+            self.next_pos = path[ix]
 
-        return check_result
+        return output
 
     def run(self):
         if state != State.ROTATE_STOP:
@@ -388,7 +397,8 @@ class BackMoveAction(EvHandle, Observer, Chainable):
             with self._lock:
                 _xy = imu_data[:2]
                 # 도착 여부 체크
-                if PathManage.transfer2_xy(_xy) == self.next_pos:
+                _dir = self.action[0]
+                if PathManage.transfer2_xy(_xy, _dir) == self.next_pos:
                     break
 
                 _angle = self.imu_data[-1]
@@ -398,9 +408,11 @@ class BackMoveAction(EvHandle, Observer, Chainable):
                 self._notifyall(
                     "node",
                     Message(
-                        title="move",
+                        title="후진",
                         data_type="command",
-                        data=dict(torque=-1.0, theta=-amend_theta),
+                        data=dict(
+                            torque=-self._pid_torque(imu_data[:2]), theta=-amend_theta
+                        ),
                     ),
                 )
 
@@ -458,6 +470,35 @@ class BackMoveAction(EvHandle, Observer, Chainable):
             amend_theta = 0.0
 
         return amend_theta
+
+    # PID제어를통한 torque 계산
+    def _pid_torque(self, cur_pos: tuple[float, float]) -> float:
+        # 에러정의
+        Kp, Ki, Kd, dt = 0.3, 0.03, 0.6, 3.0
+        max_integral = 1.0
+        next_pos = PathManage.transfer2_point(self.next_pos)
+
+        error = math.sqrt(
+            (next_pos[0] - cur_pos[0]) ** 2 + (next_pos[1] - cur_pos[1]) ** 2
+        )
+
+        self.integral_error = min(self.integral_error + error, max_integral) / dt
+
+        derivative_error = (
+            error - (self.previous_error if self.previous_error else 0.0)
+        ) / dt
+
+        self.previous_error = error
+
+        if error <= 1.0:
+            self.integral_error = 0  # 오차가 매우 작을 때 적분항 리셋
+
+        output = Kp * error + Ki * self.integral_error + Kd * derivative_error
+
+        print_log(
+            f"dynamic torque = {output}: {error=}, {self.integral_error=}, {derivative_error=}"
+        )
+        return output
 
 
 # 다음 처리방향을 세운다.

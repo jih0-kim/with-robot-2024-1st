@@ -7,6 +7,7 @@ from auto_runner.lib.path_manage import PathManage
 LoggableNode = TypeVar("LoggableNode", bound=MessageHandler)
 print_log = mmr_sampling.print_log
 
+
 class RobotController2:
     action_map = {
         DirType.LEFT: (1.0, 1.35),
@@ -19,8 +20,8 @@ class RobotController2:
         self.node = node
         self.pathMnger = PathManage(algorithm="a-star", dest_pos=(0, 0))
         self.orient: Orient = Orient.X
-        self.cur_pos = (0,0)
-        self.path = [(-1,-1)]
+        self.cur_pos = (0, 0)
+        self.path = [(-1, -1)]
         self.dest_pos = None
         IMUData.subscribe(o=self.get_msg)
 
@@ -33,16 +34,13 @@ class RobotController2:
         self.angular_data: float = self.imu_data[2]
         print_log(f"<<prepare>> {self.cur_pos} : {self.angular_data}")
 
-        # 목표경로를 정한다.        
-        if not self.dest_pos or self.cur_pos == self.dest_pos or self.cur_pos not in self.path:
+        # 목표경로를 정한다.
+        if self._need_new_path():
             self.path = self.pathMnger.search_new_path(self.cur_pos, self.orient)
-            if not self.path:
-                raise SearchEndException("No path found")
-            self.dest_pos = self.path[-1]
+            self.dest_pos = self.path[-1] if self.path else []
         else:
             cur_ix = self.path.index(self.cur_pos)
             self.path = self.path[cur_ix:]
-        return True
 
     def make_plan(self) -> Policy:
         """후진, 회전, 직진여부를 체크하고 해당 policy를 반환한다"""
@@ -54,6 +52,13 @@ class RobotController2:
         print_log(f"<<execute>> {next_plan}")
         _, self.orient = next_plan.action
         next_plan.apply(**kwargs)
+
+    def _need_new_path(self) -> bool:
+        """새로운 경로를 구해하는 조건"""
+        is_destination_reached = self.cur_pos == self.dest_pos
+        is_position_invalid = self.cur_pos not in self.path
+        is_first_try = not self.dest_pos
+        return is_first_try or is_destination_reached or is_position_invalid
 
     @property
     def check_arrived(self):

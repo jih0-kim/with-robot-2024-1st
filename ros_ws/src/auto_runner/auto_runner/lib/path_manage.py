@@ -20,12 +20,12 @@ class PathManage(Observer):
     def search_new_path(self, cur_pos: tuple, cur_orient: Orient) -> tuple:
         print_log(f"<<check_and_dest>> pos:{cur_pos}, dir:{cur_orient}")
 
-        path = []
-        count = 5
-        exclude = self.path if len(self.path) > 0 else list(cur_pos)
+        max_try_count = 5
+        exclude = self.path if len(self.path) > 0 else [cur_pos]
         exclude.extend(self.visited)
+        path = []
 
-        while len(path) == 0 and count > 0:
+        while len(path) <= 0 and max_try_count > 0:
             grid_map = self.get_msg().data
 
             dest_pos = mmr_sampling.find_farthest_coordinate(
@@ -33,16 +33,16 @@ class PathManage(Observer):
             )
             if not dest_pos:
                 print_log(f"mmr_sampling failed: map:{grid_map}")
-                break
+                raise SearchEndException("Path Finding ends")
 
             path = self.pathfinder(cur_pos, dest_pos, cur_orient)
-            if len(path) == 0:
+            if len(path) <= 1:
                 exclude.append(dest_pos)
-                count -= 1
+                max_try_count -= 1
 
             print_log(f"목표위치: {dest_pos}, A* PATH: {path}")
 
-        if len(path) == 0:
+        if len(path) <= 1:
             return []
         
         self.dest_pos = dest_pos
@@ -51,10 +51,10 @@ class PathManage(Observer):
         return self.path
 
     @classmethod
-    def transfer2_point(self, pose: tuple[int, int]) -> tuple[int, int]:
+    def transfer2_point(self, pose: tuple[int, int], dir_type:DirType=DirType.FORWARD) -> tuple[int, int]:
         # PC 맵 좌표를 SLAM 맵 좌표로 변환
-        x = pose[0]-5.0+0.5  # _x
-        y = pose[1]-5.0+0.5  # _y
+        x = pose[0]-5.0+0.5 if dir_type==DirType.FORWARD else 5.0  # _x
+        y = pose[1]-5.0+0.5 if dir_type==DirType.FORWARD else 5.0 # _y
         return (x, y)
 
     # 위치값을 맵좌표로 변환
@@ -135,7 +135,7 @@ class PathManage(Observer):
                     and 0 <= next_y < len(grid_map[0])
                     and grid_map[next_x][next_y] != 1
                     # 최초 다음위치에서 self.dir의 반대방향을 제외시킨다.
-                    and not _check_if_backpath(cur_d, next_d)
+                    # and not _check_if_backpath(cur_d, next_d)
                 ):
                     if _check_if_backpath(cur_d, next_d):
                         continue
