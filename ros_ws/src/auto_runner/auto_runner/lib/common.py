@@ -80,10 +80,10 @@ class StateData:
 
 @dataclass(slots=True, kw_only=True)
 class Message:
-    pos: str = None
     title: str = None
     data_type: str
     data: dict
+    subject: str = None
 
 
 class Chainable:
@@ -93,22 +93,43 @@ class Chainable:
 
 
 class Observer:
-    _msg_arrived: bool = False
-    _msg: Message = None
-    def get_msg(self):
-        while not self._msg_arrived:
+    # _msg_arrived: dict[str, bool] ={}
+    # _msg: dict[str, Message]={}
+    def __init__(self):
+        self._msg_arrived: dict[str, bool] = {}
+        self._msg: dict[str, Message] = {}
+    
+    def get_msg(self, subject: str = None, only_body: bool = False):
+        while True:
+            if not self._msg_arrived:
+                time.sleep(0.05)
+                continue
+            # 단일처리인 경우 next로 첫번째 선택
+            if not subject and self._msg:
+                subject = next(iter(self._msg.keys()))
+                break
+            if self._msg_arrived.get(subject, False):
+                break
             time.sleep(0.05)
-        self._msg_arrived = False
-        return self._msg
+
+        print_log(f"[Observer] get_msg: {subject}m/{self._msg}")
+        # 플래그 초기화
+        self._msg_arrived[subject] = False
+
+        if only_body:
+            return self._msg[subject].data
+
+        return self._msg[subject]
 
     def update(self, message: Message):
-        self._msg = message
-        self._msg_arrived = True
+        subject = message.subject
+        self._msg[subject] = message
+        self._msg_arrived[subject] = True
 
 
 class Observable:
     _observe_map: dict[str, list[Observer]] = {}
-    _subject: str = ""
+    _subject: str = "node"
 
     # 비동기로 callback
     @classmethod
@@ -128,10 +149,10 @@ class Observable:
 
     @classmethod
     def publish_(cls, data: object):
-        cls.publish(Message(data_type=cls._subject, data=data), cls._subject)
+        cls.publish(Message(data_type=cls._subject, data=data, subject=cls._subject))
 
     @classmethod
-    def publish(cls, message: Message, subject: str):
+    def publish(cls, message: Message, subject:str=None):
         """주제를 모든 구독자에게 전달한다."""
         subject = subject or cls._subject
         for o in cls._observe_map.get(subject, []):
@@ -170,3 +191,9 @@ class EvHandle(threading.Thread):
 
         # asyncio.get_event_loop().run_until_complete(create_task())
         Observable.publish(message, subject)
+
+
+def print_log(message: str, subject: str = "node"):
+    Observable.publish(
+        Message(subject=subject, data_type="log", data=message)
+    )

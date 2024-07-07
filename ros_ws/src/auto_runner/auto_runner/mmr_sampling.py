@@ -1,28 +1,25 @@
 import numpy as np
 import random
-import math
-from auto_runner.lib.common import Message, Observable
-
-def print_log(message:str, class_:str=None):
-    Observable.publish(Message(pos=class_, data_type='log', data=message), subject='node')
+from auto_runner.lib.common import print_log
 
 def euclidean_distance(a:tuple, b:tuple):
+    # print_log(f'euclidean_distance: {a=},{b=}')
     return np.linalg.norm(np.array(a) - np.array(b))
 
-def find_farthest_coordinate(map: list, base: tuple, exclude:list[tuple]) -> tuple:
-    
+def find_farthest_coordinate(map: list, base: tuple, exclude:set[tuple]) -> tuple:
+    print_log(f"find_farthest_coordinate: \nbase:{base}\nexclude:{exclude}\nmap:{map}")
     # 맵에서 빈셀들을 선택
     arr = np.array(map)
     cordinates = []
     for i in range(arr.shape[0]):
         for j in range(arr.shape[1]):
-            if any(euclidean_distance((i,j), pos) < 3 for pos in exclude):
+            if any(euclidean_distance((i,j), pos) < 1.5 for pos in exclude):
                 continue
             if arr[i, j] == 0:
                 cordinates.append((i, j))
     
     if len(cordinates) == 0:
-        return random.choice(exclude)
+        return []
     
     # 입력 좌표와 다른 좌표들 간의 거리를 계산
     distances = []

@@ -14,6 +14,7 @@ from auto_runner.lib.parts import *
 from auto_runner.lib.car_drive2 import RobotController2
 from auto_runner.lib.common import Message, Observable, SearchEndException
 
+
 class GridMap(Node):
     def __init__(self) -> None:
         super().__init__("grid_map_node")
@@ -33,7 +34,7 @@ class GridMap(Node):
     def receive_map(self, map: OccupancyGrid):
         raw_data = np.array(map.data, dtype=np.int8)
         grid_map = convert_map(raw_data)
-        MapData.publish_(data = grid_map)
+        MapData.publish_(data=grid_map)
 
 
 class LidarScanNode(Node):
@@ -81,49 +82,53 @@ class AStartSearchNode(Node):
             CmdMsg, "jetauto_car/cmd_msg", self.send_command
         )
 
+        Observable.subscribe(o=self.update, subject="node")
+        LidarData.subscribe(o=self.laser_scan)
         self.setup()
 
         self.get_logger().info(f"AStart_Path_Search_Mode has started...")
 
-
     def setup(self) -> None:
-        Observable.subscribe(o=self.update, subject='node')
-        LidarData.subscribe(o=self.laser_scan)
         self.robot_ctrl = RobotController2(node=self)
-        self.act_complete = True
+        self.step_completed = True
+        self.is_searching_finished = False
         self.nanoseconds = 0
 
         self.get_logger().info("초기화 처리 완료")
-    
-    def laser_scan(self, data: LaserScan) -> None:
-        self.laser_scan = data
 
     def unity_tf_callback(
-        self, loc_data: TwistStamped
+        self, imu_data: TwistStamped
     ) -> None:  # msg로부터 위치정보를 추출
-        
-        IMUData.publish_(data=loc_data)
 
+        IMUData.publish_(data=imu_data)
+
+        if self.is_searching_finished:
+            return
         # 로봇 이동계획을 수립한다.
         # 다음 위치는 무엇이고 회전인지 직진인지 아니면 후진을 해야하는지를 판단해야함
         # 계획이 세워지면, thread를 통해 추진하고 경과를 event를 통해 전달한다.
-        if self.act_complete:
-            self.robot_ctrl.prepare()
+        if self.step_completed:
+            if not self.robot_ctrl.prepare():
+                self.print_log("search Finished.....")
+                self.is_searching_finished = True
+                return
             action_plan = self.robot_ctrl.make_plan()
-            
+
             # 로봇에 계획을 전달한다.
             self.robot_ctrl.execute(action_plan)
-            self.act_complete = False
-                        
+            self.step_completed = False
+
         else:
             # 각종 체크 수행
             # IMU/lidar를 통해 장애물, 경로이탈, 동체수평 여부 체크를 한다.
             if self._is_near():
-                self._send_message(title='근접제어', x=self.state_near[0], theta=self.state_near[1])
+                self._send_message(
+                    title="근접제어", x=self.state_near[0], theta=self.state_near[1]
+                )
 
     # 로봇이 전방물체와 50cm이내 접근상태이면 True를 반환
     def _is_near(self) -> tuple[bool, tuple]:
-        lidar_msg = self.laser_scan.data
+        lidar_msg = self.laser_scan
         if lidar_msg:
             time = Time.from_msg(lidar_msg.header.stamp)
             # Run if only laser scan from simulation is updated
@@ -149,14 +154,18 @@ class AStartSearchNode(Node):
                 min_distance = distance_map.get(4)
                 # map에서 value로 index를 찾는다.
                 torq_map = {
+                    0: -0.3,
+                    1: -0.2,
                     2: -0.2,
-                    3: -0.25,
-                    4: -0.3,
-                    5: -0.25,
+                    3: -0.3,
+                    4: -0.4,
+                    5: -0.3,
                     6: -0.2,
+                    7: -0.2,
+                    8: -0.3,
                 }
                 min_index = next(
-                    key for key, value in distance_map.items() if value == min_distance
+                    key for key, value in distance_map.items() if value <= min_distance
                 )
                 angle = -1.0 if min_index < 4 else -0.1 if min_index == 4 else 1.0
                 torque = torq_map.get(min_index, 0.0)
@@ -166,7 +175,7 @@ class AStartSearchNode(Node):
                 self.get_logger().info(
                     f"distances:{min_distance}/기준:{nearest_distance}"
                 )
-                self.get_logger().info(f"index:{min_index}, T/A: {torque}/{angle}")
+                self.get_logger().info(f"[_is_near] index:{min_index}, T/A: {torque}/{angle}")
                 return min_distance <= nearest_distance
 
         return False
@@ -180,8 +189,6 @@ class AStartSearchNode(Node):
             x = int(request.data.x)
             y = int(request.data.y)
             self.set_destpos((x, y))
-        elif request.message == "set_torque":
-            self.FWD_TORQUE = request.data.x
         else:
             response.success = False
 
@@ -197,20 +204,27 @@ class AStartSearchNode(Node):
 
     def print_log(self, message) -> None:
         self.get_logger().info(message)
-    
+
+    def laser_scan(self, message: Message):
+        self.laser_scan = message.data
+
     def update(self, message: Message):
-        self.print_log(f'data_type: {message.data_type}, data: {message.data}')
-         
-        if message.data_type == "command":        
+        self.print_log(f"data_type: {message.data_type}, data: {message.data}")
+
+        if message.data_type == "command":
             self._send_message(
-                title=message.data.get('name'), x=float(message.data['torque']), theta=float(message.data['theta']))
+                title=message.data.get("name"),
+                x=float(message.data["torque"]),
+                theta=float(message.data["theta"]),
+            )
 
         elif message.data_type == "notify":
-            self.act_complete = True
+            self.step_completed = True
             # self.print_log(f'data_type: {message.data_type}, data: act_complete')
-            
+
         # elif message.data_type == 'log':
         #     self.print_log(message.data)
+
 
 def main(args=None):
     rclpy.init(args=args)

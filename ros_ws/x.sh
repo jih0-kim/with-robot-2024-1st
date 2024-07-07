@@ -14,18 +14,32 @@ usage() {
     echo "  -l: Launch option (default: ${DEFAULT_LAUNCH})"
     exit 1
 }
+do_import() {
+    if [ -f install/setup.bash ]; then
+        source install/setup.bash
+    else
+        echo "Error: install/setup.bash not found"
+    fi
+	exit 1
+}
 
 # 인자 파싱
+unset type
 while [ $# -gt 0 ]; do
     case "$1" in
         -p) shift; pkg="$1" ;;
-        -b) shift; build=$1; type=build; break ;;
-        -l) shift; launch="$1"; type=launch; break ;;
+        -b) shift; build=$1; type=build ;;
+        -l) shift; launch="$1"; type=launch ;;
+	    -s) do_import; break ;;
         *) usage ;;
     esac
     shift
 done
 
+if [[ -z "$type" ]]; then
+  echo "sourcing"
+  exit
+fi
 # 변수 설정 (기본값 사용)
 PKG=${pkg:-$DEFAULT_PKG}
 BLD=${build:-$DEFAULT_BUILD}
@@ -65,3 +79,5 @@ else
     echo "Error: Invalid type. Must be 'build' or 'launch'."
     usage
 fi
+
+do_import
