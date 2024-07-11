@@ -1,7 +1,6 @@
 from rclpy.node import Node
 from auto_runner.lib.common import TypeVar, SearchEndException, print_log
 from auto_runner.lib.parts import *
-from auto_runner import mmr_sampling
 from auto_runner.lib.path_manage import PathManage
 
 LoggableNode = TypeVar("LoggableNode", bound=MessageHandler)

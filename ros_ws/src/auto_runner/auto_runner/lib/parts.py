@@ -7,6 +7,7 @@ import time
 state: StateData = StateData(State.ROTATE_STOP, State.ROTATE_STOP)
 orient: StateData = StateData(Orient.X, Orient.X)
 
+
 class PolicyType(Enum):
     ROTATE = "rotate"
     STRAIGHT = "move"
@@ -81,13 +82,13 @@ class MoveAction(EvHandle, Observer, Chainable):
             self.next_pos = path[ix]
 
         return output
-    
-    def _decide_direction(self, cur_pos, next_pos, orient:Orient) -> DirType:
+
+    def _decide_direction(self, cur_pos, next_pos, orient: Orient) -> DirType:
         if orient == Orient.X:
             return DirType.FORWARD if next_pos[0] >= cur_pos[0] else DirType.BACKWARD
         elif orient == Orient._X:
             return DirType.FORWARD if next_pos[0] < cur_pos[0] else DirType.BACKWARD
-        elif orient ==  Orient.Y:
+        elif orient == Orient.Y:
             return DirType.FORWARD if next_pos[1] >= cur_pos[1] else DirType.BACKWARD
         elif orient == Orient._Y:
             return DirType.FORWARD if next_pos[1] < cur_pos[1] else DirType.BACKWARD
@@ -106,29 +107,33 @@ class MoveAction(EvHandle, Observer, Chainable):
             imu_data = self.get_msg(only_body=True)
 
             with self._lock:
-                _cur_pos = imu_data[:2]                
+                _cur_pos = imu_data[:2]
+                _angle = imu_data[-1]
                 _next_dir = self.action[0]
                 _next_orient = self.action[1]
-                self.cur_pos = PathManage.transfer2_xy(_cur_pos)
-                print_log(f"cur: {self.cur_pos} : dest: {self.next_pos}")
+                # self.cur_pos = PathManage.transfer2_xy(_cur_pos)
+                _next_pos = PathManage.transfer2_point(
+                    self.next_pos, _next_orient, _next_dir
+                )
+
+                print_log(f"cur: {_cur_pos} : dest: {_next_pos}")
 
                 # 도착 여부 체크
-                if self.cur_pos == self.next_pos:
+                _pid_torque = self._pid_torque(_cur_pos, _next_pos, _next_dir)
+                if abs(_pid_torque) <= 0.2:
                     break
 
-                _angle = imu_data[-1]
-                amend_theta: float = self._adjust_body(_next_orient, _angle)
-
-                _next_pos = PathManage.transfer2_point(self.next_pos, _next_orient, _next_dir)
+                _data = {
+                    "torque": _pid_torque,
+                    "theta": self._adjust_body(_next_orient, _angle, _next_dir),
+                }
 
                 self._notifyall(
                     "node",
                     Message(
                         title="move",
                         data_type="command",
-                        data=dict(
-                            torque=self._pid_torque(_cur_pos, _next_pos, _next_dir), theta=amend_theta
-                        ),
+                        data=_data,
                     ),
                 )
 
@@ -140,10 +145,15 @@ class MoveAction(EvHandle, Observer, Chainable):
         IMUData.unsubscribe(o=self)
 
     # PID제어를통한 torque 계산
-    def _pid_torque(self, cur_pos: tuple[float, float], next_pos: tuple[float, float], direction:DirType) -> float:
+    def _pid_torque(
+        self,
+        cur_pos: tuple[float, float],
+        next_pos: tuple[float, float],
+        direction: DirType,
+    ) -> float:
         # 에러정의
         Kp, Ki, Kd, dt = 0.3, 0.03, 0.6, 3.0
-        max_integral = 1.0        
+        max_integral = 1.0
 
         error = math.sqrt(
             (next_pos[0] - cur_pos[0]) ** 2 + (next_pos[1] - cur_pos[1]) ** 2
@@ -165,16 +175,16 @@ class MoveAction(EvHandle, Observer, Chainable):
         print_log(
             f"dynamic torque = {output}: {error=}, {self.integral_error=}, {derivative_error=}"
         )
-        return output *(1 if direction==DirType.FORWARD else -1)
+        return output * (1 if direction == DirType.FORWARD else -1)
 
     # 수평상태
-    def _adjust_body(self, orient: Orient, angle: float):
+    def _adjust_body(self, orient: Orient, angle: float, dir: DirType):
         amend_theta: float = self.__get_deviation_radian(orient, angle)
         # 2도 초과에서 보정
-        if abs(amend_theta) <= 2 / 180 * math.pi:            
+        if abs(amend_theta) <= 2 / 180 * math.pi:
             amend_theta = 0.0
 
-        return amend_theta * 0.8
+        return amend_theta * (0.8 if dir == DirType.FORWARD else -0.8)
 
     # 각도를 입력받아, 진행방향과 벗어난 각도를 반환한다.
     def __get_deviation_radian(self, orient: Orient, angle: float) -> float:
@@ -204,9 +214,6 @@ class MoveAction(EvHandle, Observer, Chainable):
 
 
 class RotateAction(EvHandle, Observer, Chainable):
-    start_angle: float
-
-    rotate_map = {"basic": (0.3, 0.15), "fast": (0.4, 0.20)}
 
     def __init__(self, orient: Orient, cur_pos: tuple, path: list[tuple]):
         EvHandle.__init__(self)
@@ -214,9 +221,10 @@ class RotateAction(EvHandle, Observer, Chainable):
         self.orient = orient
         self.cur_pos = cur_pos
         self.path = path
-        self.rotate_policy = self.rotate_map["fast"]
 
     def setup(self, **kwargs):
+        self.integral_error = 0
+        self.previous_error = 0
         IMUData.subscribe(o=self)
 
     def check_condition(self):
@@ -278,7 +286,8 @@ class RotateAction(EvHandle, Observer, Chainable):
                 angle_diff: float = self._get_diff(_fr_angle, _to_angle)
 
                 # 회전완료 여부 체크
-                if abs(angle_diff) < self.rotate_policy[0]:
+                _theta = self._pid_theta(_fr_angle, _to_angle)
+                if abs(angle_diff) < 0.3:
                     break
 
                 sign_ = 1 if self.action[0] == DirType.LEFT else -1
@@ -288,8 +297,8 @@ class RotateAction(EvHandle, Observer, Chainable):
                         data_type="command",
                         data=dict(
                             name="회전",
-                            torque=self.rotate_policy[1],
-                            theta=sign_ * 1.35,
+                            torque=_theta,
+                            theta=1.35 * sign_,
                         ),
                     ),
                 )
@@ -298,6 +307,36 @@ class RotateAction(EvHandle, Observer, Chainable):
 
         state.shift(State.ROTATE_STOP)
         IMUData.unsubscribe(o=self)
+
+    # PID제어를통한 torque 계산
+    def _pid_theta(
+        self, cur_theta: tuple[float, float], next_theta: tuple[float, float]
+    ) -> float:
+        # 에러정의
+        Kp, Ki, Kd = 0.5, 0.01, 0.3
+
+        cur_theta = cur_theta % (2 * math.pi)
+        if abs(cur_theta - next_theta) > math.pi:
+            cur_theta += 2 * math.pi
+        error = next_theta - cur_theta
+
+        self.integral_error = self.integral_error + error
+
+        derivative_error = (
+            0 if self.previous_error == 0 else error - self.previous_error
+        )
+
+        self.previous_error = error
+
+        val = Kp * error + Ki * self.integral_error + Kd * derivative_error
+
+        # 평준화 -1.35 ~ 1.35
+        output = min(abs(val), 1.5)
+
+        print_log(
+            f"dynamic torque = {output}: {error=}, {self.integral_error=}, {derivative_error=}"
+        )
+        return output
 
     # 목표 각도 설정
     def _get_target_angle(self) -> float:
@@ -318,7 +357,6 @@ class RotateAction(EvHandle, Observer, Chainable):
 
         print_log(f"rotate: {cur_angle} : {target_angle}")
         return target_angle - cur_angle
-
 
     # x,y,angle.z
     # def update(self, message: Message):
@@ -371,7 +409,12 @@ class RotateAction(EvHandle, Observer, Chainable):
         return amend_theta
 
     # PID제어를통한 torque 계산
-    def _pid_torque(self, cur_pos: tuple[float, float], next_pos:tuple[float, float], direction:DirType) -> float:
+    def _pid_torque(
+        self,
+        cur_pos: tuple[float, float],
+        next_pos: tuple[float, float],
+        direction: DirType,
+    ) -> float:
         # 에러정의
         Kp, Ki, Kd, dt = 0.3, 0.03, 0.6, 3.0
         max_integral = 1.0
@@ -396,7 +439,7 @@ class RotateAction(EvHandle, Observer, Chainable):
         print_log(
             f"dynamic torque = {output}: {error=}, {self.integral_error=}, {derivative_error=}"
         )
-        return output *(1 if direction == DirType.FORWARD else -1)
+        return output * (1 if direction == DirType.FORWARD else -1)
 
 
 # 다음 처리방향을 세운다.

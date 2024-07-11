@@ -1,7 +1,7 @@
 import math, re
 from collections import deque
 from auto_runner.lib.common import *
-from auto_runner import mmr_sampling
+from auto_runner.lib.sampling import find_farthest_coordinate
 
 LoggableNode = TypeVar("LoggableNode", bound=MessageHandler)
 
@@ -28,13 +28,11 @@ class PathManage(Observer):
         while len(path) == 0 and max_try_count > 0:
             grid_map = self.get_msg(only_body=True)
 
-            dest_pos = mmr_sampling.find_farthest_coordinate(
+            dest_pos = find_farthest_coordinate(
                 grid_map, cur_pos, exclude
             )
             if not dest_pos:
-                print_log(f"mmr_sampling failed: map:{grid_map}")
-                print_log(f"mmr_sampling failed: exclude:{exclude}")
-                # raise SearchEndException("Path Finding ends")
+                print_log(f"mmr_sampling failed: map:{grid_map}, \nexclude:{exclude}")
                 max_try_count -= 1
                 continue
 
@@ -55,16 +53,9 @@ class PathManage(Observer):
 
     @classmethod
     def transfer2_point(self, pose: tuple[int, int], origin:Orient, dir_type:DirType) -> tuple[float, float]:
-        # PC 맵 좌표를 SLAM 맵 좌표로 변환
-        if origin in [Orient.X, Orient.Y]:
-            offset_x = 0.2 if dir_type==DirType.FORWARD else 0.9  # _x
-            offset_y = 0.2 if dir_type==DirType.FORWARD else 0.9 # _y
-        else:
-            offset_x = 0.2 if dir_type==DirType.BACKWARD else 0.9  # _x
-            offset_y = 0.2 if dir_type==DirType.BACKWARD else 0.9 # _y
-        
-        x = pose[0]-5.0+offset_x
-        y = pose[1]-5.0+offset_y
+        # PC 맵 좌표를 SLAM 맵 좌표로 변환        
+        x = pose[0]-5.0+ (0.2 if dir_type==DirType.FORWARD else 0.9)
+        y = pose[1]-5.0+ (0.2 if dir_type==DirType.FORWARD else 0.9)
         return (x, y)
 
     # 위치값을 맵좌표로 변환

@@ -158,7 +158,7 @@ class AStartSearchNode(Node):
                     1: -0.2,
                     2: -0.2,
                     3: -0.3,
-                    4: -0.4,
+                    4: -0.7,
                     5: -0.3,
                     6: -0.2,
                     7: -0.2,
@@ -167,15 +167,15 @@ class AStartSearchNode(Node):
                 min_index = next(
                     key for key, value in distance_map.items() if value <= min_distance
                 )
-                angle = -1.0 if min_index < 4 else -0.1 if min_index == 4 else 1.0
+                angle = -1.0 if min_index < 4 else 0.0 if min_index == 4 else 1.0
                 torque = torq_map.get(min_index, 0.0)
 
                 self.state_near = (torque, angle)
 
-                self.get_logger().info(
-                    f"distances:{min_distance}/기준:{nearest_distance}"
-                )
-                self.get_logger().info(f"[_is_near] index:{min_index}, T/A: {torque}/{angle}")
+                # self.get_logger().info(
+                #     f"distances:{min_distance}/기준:{nearest_distance}"
+                # )
+                # self.get_logger().info(f"[_is_near] index:{min_index}, T/A: {torque}/{angle}")
                 return min_distance <= nearest_distance
 
         return False
@@ -197,7 +197,7 @@ class AStartSearchNode(Node):
     def _send_message(
         self, *, title: str = None, x: float = 0.0, theta: float = 0.0
     ) -> None:
-        self.get_logger().info(f"#### {title} ### torque:{x}, angular:{theta} ####")
+        # self.get_logger().info(f"#### {title} ### torque:{x}, angular:{theta} ####")
         self.twist_msg.linear = Vector3(x=x, y=0.0, z=0.0)
         self.twist_msg.angular = Vector3(x=0.0, y=0.0, z=theta)
         self.pub_jetauto_car.publish(self.twist_msg)
@@ -209,7 +209,6 @@ class AStartSearchNode(Node):
         self.laser_scan = message.data
 
     def update(self, message: Message):
-        self.print_log(f"data_type: {message.data_type}, data: {message.data}")
 
         if message.data_type == "command":
             self._send_message(
@@ -217,14 +216,14 @@ class AStartSearchNode(Node):
                 x=float(message.data["torque"]),
                 theta=float(message.data["theta"]),
             )
+            self.print_log(f"data_type: {message.data_type}, data: {message.data}")
 
         elif message.data_type == "notify":
             self.step_completed = True
-            # self.print_log(f'data_type: {message.data_type}, data: act_complete')
+            self.print_log(f'data_type: {message.data_type}, data: act_complete')
 
-        # elif message.data_type == 'log':
-        #     self.print_log(message.data)
-
+        elif message.data_type == 'log':
+            self.print_log(f"title: {message.title}, log: {message.data}")
 
 def main(args=None):
     rclpy.init(args=args)

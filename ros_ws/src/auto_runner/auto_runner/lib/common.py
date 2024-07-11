@@ -112,7 +112,7 @@ class Observer:
                 break
             time.sleep(0.05)
 
-        print_log(f"[Observer] get_msg: {subject}m/{self._msg}")
+        # print_log(f"[Observer] get_msg: {subject}m/{self._msg}")
         # 플래그 초기화
         self._msg_arrived[subject] = False
 
