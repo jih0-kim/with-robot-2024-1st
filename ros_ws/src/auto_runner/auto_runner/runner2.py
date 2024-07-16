@@ -128,57 +128,45 @@ class AStartSearchNode(Node):
 
     # 로봇이 전방물체와 50cm이내 접근상태이면 True를 반환
     def _is_near(self) -> tuple[bool, tuple]:
-        lidar_msg = self.laser_scan
-        if lidar_msg:
-            time = Time.from_msg(lidar_msg.header.stamp)
-            # Run if only laser scan from simulation is updated
-            if time.nanoseconds > self.nanoseconds:
-                self.nanoseconds = time.nanoseconds
+        nearest_distance = 0.25  # 50cm
 
-                ### Driving ###
-                nearest_distance = 0.25  # 50cm
+        # 일급함수
+        def range_func(lst: list):
+            index_map = [
+                "0:8:-0.5",
+                "8:16:-0.5",
+                "16:24:-0.4",
+                "24:30:-0.4",
+                "30:35:-0.6",
+                "35:41:-0.4",
+                "41:49:-0.4",
+                "49:57:-0.5",
+                "57:65:-0.5",
+            ]
 
-                distance_map = {}
-                distance_map.update({0: min(lidar_msg.ranges[0:8])})  # 우측
-                distance_map.update({1: min(lidar_msg.ranges[8:16])})
-                distance_map.update({2: min(lidar_msg.ranges[16:24])})
-                distance_map.update({3: min(lidar_msg.ranges[24:28])})
+            def _func(index: int) -> tuple:
+                if index > 8:
+                    index = 8
+                start, end, torque = index_map[index].split(":")
+                return min(lst[int(start):int(end)]), float(torque)
 
-                distance_map.update({4: min(lidar_msg.ranges[28:37])})  # 중앙
+            return _func
 
-                distance_map.update({5: min(lidar_msg.ranges[37:41])})  # 좌측
-                distance_map.update({6: min(lidar_msg.ranges[41:49])})
-                distance_map.update({7: min(lidar_msg.ranges[49:57])})
-                distance_map.update({8: min(lidar_msg.ranges[57:65])})
+        ranger = range_func(self.laser_scan.ranges)
+        ### Driving ###
 
-                min_distance = distance_map.get(4)
-                # map에서 value로 index를 찾는다.
-                torq_map = {
-                    0: -0.3,
-                    1: -0.2,
-                    2: -0.2,
-                    3: -0.3,
-                    4: -0.7,
-                    5: -0.3,
-                    6: -0.2,
-                    7: -0.2,
-                    8: -0.3,
-                }
-                min_index = next(
-                    key for key, value in distance_map.items() if value <= min_distance
-                )
-                angle = -1.0 if min_index < 4 else 0.0 if min_index == 4 else 1.0
-                torque = torq_map.get(min_index, 0.0)
+        min_indexes = [
+            index for index in range(9) if ranger(index)[0] <= nearest_distance
+        ]
 
-                self.state_near = (torque, angle)
+        if min_indexes:
+            min_index = min(min_indexes)
+            torque = ranger(min_index)[1]
+            angle = -1.0 if min_index < 4 else 0.2 if min_index == 4 else 1.0
 
-                # self.get_logger().info(
-                #     f"distances:{min_distance}/기준:{nearest_distance}"
-                # )
-                # self.get_logger().info(f"[_is_near] index:{min_index}, T/A: {torque}/{angle}")
-                return min_distance <= nearest_distance
+            self.state_near = (torque, angle)
 
-        return False
+        return len(min_indexes) > 0
 
     def send_command(self, request, response) -> None:
         self.get_logger().info(f"request: {request}")
@@ -220,10 +208,11 @@ class AStartSearchNode(Node):
 
         elif message.data_type == "notify":
             self.step_completed = True
-            self.print_log(f'data_type: {message.data_type}, data: act_complete')
+            self.print_log(f"data_type: {message.data_type}, data: act_complete")
 
-        elif message.data_type == 'log':
+        elif message.data_type == "log":
             self.print_log(f"title: {message.title}, log: {message.data}")
+
 
 def main(args=None):
     rclpy.init(args=args)

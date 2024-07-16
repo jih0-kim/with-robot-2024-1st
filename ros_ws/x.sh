@@ -19,18 +19,18 @@ do_import() {
         source install/setup.bash
     else
         echo "Error: install/setup.bash not found"
-    fi
 	exit 1
+    fi
 }
 
 # 인자 파싱
 unset type
-while [ $# -gt 0 ]; do
+while (( $# )); do
     case "$1" in
         -p) shift; pkg="$1" ;;
         -b) shift; build=$1; type=build ;;
         -l) shift; launch="$1"; type=launch ;;
-	    -s) do_import; break ;;
+        -s) do_import; echo "Load source"; exit 0;;
         *) usage ;;
     esac
     shift
@@ -69,6 +69,9 @@ do_launch() {
     ros2 launch "$PKG" "${PKG}.${LAUNCH}.py"
 }
 
+# sourcing
+do_import
+
 # 메인 로직
 if [ "$TYP" = "build" ]; then
     do_build
@@ -79,5 +82,3 @@ else
     echo "Error: Invalid type. Must be 'build' or 'launch'."
     usage
 fi
-
-do_import
